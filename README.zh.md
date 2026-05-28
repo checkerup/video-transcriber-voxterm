@@ -8,6 +8,12 @@
 > 说话人分离流程的灵感来自 [@dmarzzz](https://github.com/dmarzzz) 的
 > [`VoxTerm`](https://github.com/dmarzzz/VoxTerm) — 完整署名见 [`NOTICE.md`](NOTICE.md)。
 
+> 🎨 **想要图形界面？**
+> 基于 PyWebView 的桌面版本（文件选择、实时进度条、设置面板、历史、一键重新说话人分离）
+> 位于 [`feat/desktop-ui`](https://github.com/checkerup/video-transcriber-voxterm/tree/feat/desktop-ui) 分支。
+> 此分支仅 CLI。
+
+
 # Video Transcriber
 
 自动视频转录：监控文件夹或程序启动，录制屏幕，本地转录（免费！），发送 Telegram 通知。
@@ -23,6 +29,9 @@
 - **音频提取** — FFmpeg 无需重编码即可提取 MP3
 - **转录** — faster-whisper（本地、免费、隐私）带时间戳
 - **通知** — Telegram 机器人完成后发送文件路径通知
+- **🤖 多供应商 LLM 摘要** — Gemini、OpenAI、Anthropic、OpenRouter，或任何 OpenAI 兼容端点（通过 `api_base`）。
+- **📎 可选 Telegram 附件** — 发送字幕文件（或内联文本）、摘要 .md、音频、视频，全部可配置。
+- **🔁 重新标注说话人** — 在现有字幕上仅重跑说话人分离，无需重新运行 Whisper（`--retag-speakers PATH --num-speakers N`）。
 - **自动启动** — 一键安装为自启动服务（Windows/macOS/Linux）
 - **交互式菜单** — `menu.bat` / `menu.sh` 包含所有模式
 - **跨平台** — Windows、macOS、Linux

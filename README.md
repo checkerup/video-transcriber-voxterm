@@ -7,6 +7,9 @@
 >
 > The diarization pipeline is inspired by [`VoxTerm`](https://github.com/dmarzzz/VoxTerm)
 > by [@dmarzzz](https://github.com/dmarzzz) — full credits in [`NOTICE.md`](NOTICE.md).
+>
+> 🎨 **Looking for the desktop GUI?**
+> A graphical version with drag-drop, live progress bars, settings forms, and history exists on the `feat/desktop-ui` branch. Screenshots and details are TBD. This branch (`feat/voxterm-integration`) is the CLI-only flavour.
 
 # Video Transcriber
 
@@ -23,8 +26,9 @@ Automatic video transcription: watches a folder or program launches, records scr
 - **Audio extraction** — FFmpeg pulls MP3 without re-encoding
 - **Transcription** — faster-whisper (local, free, private) with timestamps
 - **Notifications** — Telegram bot reports when done with file paths
-- **Autostart** — install as auto-start service with one command (Windows/macOS/Linux)
-- **Interactive menu** — `menu.bat` / `menu.sh` with all modes
+- **🤖 Multi-provider LLM summarization** — choose between Gemini, OpenAI, Anthropic, OpenRouter, or any OpenAI-compatible endpoint (custom api_base).
+- **📎 Optional Telegram attachments** — send the transcript file (or inline text), summary .md, audio, even the video, all configurable per file size limit.
+- **🔁 Retag-speakers** — re-r
 - **Cross-platform** — Windows, macOS, Linux
 - **Offline speaker diarization** — sherpa-onnx + 3D-Speaker (CAM++ / ERes2NetV2) + pyannote-3.0 segmentation. Fully local, no HF token, models auto-downloaded on first run (~30 MB). Inspired by VoxTerm.
 - **Live recording mode** — `--record-live voice|screen|full` records mic (and optionally screen + system-audio loopback), then auto-transcribes on stop. Windows uses WASAPI loopback, **no VB-Cable required**.
