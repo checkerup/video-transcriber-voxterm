@@ -232,6 +232,15 @@ def transcribe(audio_path: str, config: AppConfig, speaker_turns: list[dict] | N
                 _fmt_hms(elapsed),
                 _fmt_hms(eta),
             )
+            gui_cb = getattr(config, "_gui_progress_cb", None)
+            if gui_cb is not None:
+                try:
+                    # Map 0..1 transcribe progress into the 0.35..0.90 band
+                    # we allocated for the transcribe stage in the pipeline.
+                    overall = 0.35 + 0.55 * max(0.0, min(1.0, progress_frac))
+                    gui_cb("transcribe", overall, float(elapsed or 0.0), float(eta or 0.0))
+                except Exception:
+                    pass
             last_log_time = current_time
     logger.info(
         "Transcription complete: %d segments, language=%s (%.1f%% confidence)",

@@ -229,9 +229,9 @@ def _render_vtt(tagged: list[dict]) -> str:
 
 def retag_speakers(
     transcript_path: str,
-    audio_path: str | None,
     config: AppConfig,
     *,
+    audio_path: str | None = None,
     backend: str | None = None,
     model: str | None = None,
     cluster_threshold: float | None = None,

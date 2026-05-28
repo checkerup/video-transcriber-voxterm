@@ -258,6 +258,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the GUI"
+    )
+    parser.add_argument(
+        "--gui-debug",
+        action="store_true",
+        help="Enable debug logging for the GUI"
+    )
+    parser.add_argument(
         "--retag-speakers",
         type=str,
         default=None,
@@ -413,6 +423,16 @@ def main():
         run_live(config, args.record_live)
     elif args.record:
         run_record(config)
+    elif args.gui:
+        from video_transcriber.webui import launch as _launch_gui
+        gui_cfg_path = config_path if config_path else (project_root / "config.yaml")
+        _launch_gui(
+            config=config,
+            config_path=gui_cfg_path,
+            project_root=project_root,
+            debug=args.gui_debug,
+        )
+        sys.exit(0)
     else:
         run_daemon(config)
 

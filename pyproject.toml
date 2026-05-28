@@ -35,14 +35,16 @@ diarization-pyannote = ["pyannote.audio>=3.1"]
 # Back-compat alias: the original optional extra was just "diarization" and
 # meant pyannote. Kept as an alias so existing install snippets still work.
 diarization = ["pyannote.audio>=3.1"]
-# Live recording (mic + system audio loopback). System-audio loopback works
-# on Windows out of the box (WASAPI), on Linux via PulseAudio monitors, and
-# on macOS via ScreenCaptureKit (modern macOS) or BlackHole.
+# Live recording mode (mic / screen / system audio loopback).
 live-record = [
     "sounddevice>=0.4",
     "soundfile>=0.12",
     "soundcard>=0.4",
     "numpy>=1.24",
+]
+# Desktop GUI (PyWebView-based).
+gui = [
+    "pywebview>=5.0",
 ]
 dev = ["pytest>=7.0", "ruff>=0.4"]
 
@@ -51,6 +53,9 @@ video-transcriber = "video_transcriber.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"video_transcriber.webui" = ["static/*", "static/**/*"]
 
 [tool.ruff]
 line-length = 100

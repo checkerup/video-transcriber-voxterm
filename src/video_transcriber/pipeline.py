@@ -43,6 +43,16 @@ def process_file(file_path: str, config: AppConfig) -> dict:
     timer = ProgressTimer()
     config.__dict__["_progress_timer"] = timer  # so transcriber can access it
 
+    cb = getattr(config, "_gui_progress_cb", None)
+    def _notify_stage(name: str, progress: float) -> None:
+        if cb is None:
+            return
+        try:
+            elapsed = timer.total_elapsed
+            cb(name, progress, float(elapsed), 0.0)
+        except Exception:
+            pass
+
     result: dict = {
         "video": None,
         "audio": None,
@@ -64,6 +74,7 @@ def process_file(file_path: str, config: AppConfig) -> dict:
         video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"}
 
         if suffix in audio_extensions:
+            _notify_stage("copy_audio", 0.02)
             with timer.stage("copy_audio"):
                 output_audio = copy_audio_to_output(file_path, config)
             result["audio"] = output_audio
@@ -71,10 +82,12 @@ def process_file(file_path: str, config: AppConfig) -> dict:
 
         elif suffix in video_extensions:
             was_video = True
+            _notify_stage("copy_video", 0.02)
             with timer.stage("copy_video"):
                 output_video = copy_video_to_output(file_path, config)
             result["video"] = output_video
 
+            _notify_stage("extract_audio", 0.05)
             with timer.stage("extract_audio"):
                 extracted_audio = extract_audio(output_video, config)
             result["audio"] = extracted_audio
@@ -90,16 +103,19 @@ def process_file(file_path: str, config: AppConfig) -> dict:
 
         speaker_turns = None
         if audio_path and getattr(config, "diarization", None) and config.diarization.enabled:
+            _notify_stage("diarize", 0.10)
             with timer.stage("diarize"):
                 from .diarizer import diarize_audio
                 speaker_turns = diarize_audio(audio_path, config)
 
         if audio_path:
+            _notify_stage("transcribe", 0.35)
             with timer.stage("transcribe"):
                 transcript_path = transcribe(audio_path, config, speaker_turns=speaker_turns)
             result["transcript"] = transcript_path
 
-        if result["transcript"]:
+        if config.summarization.enabled and result["transcript"]:
+            _notify_stage("summarize", 0.95)
             with timer.stage("summarize"):
                 with open(result["transcript"], "r", encoding="utf-8") as f:
                     transcript_text = f.read()
@@ -122,6 +138,7 @@ def process_file(file_path: str, config: AppConfig) -> dict:
                 logger.warning("Failed to delete temporary audio file: %s", e)
 
         logger.info("Pipeline complete for: %s", file_path)
+        _notify_stage("complete", 1.0)
 
     except Exception as e:
         logger.exception("Pipeline failed for: %s", file_path)

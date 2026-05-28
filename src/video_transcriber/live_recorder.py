@@ -276,9 +276,10 @@ class LiveRecorder:
 
         logger.info("Screen capture starting -> %s (fps=%s)", out_path, fps)
         logger.debug("ffmpeg screen cmd: %s", " ".join(cmd))
-        self._ffmpeg_screen = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-        )
+        _popen_kwargs = dict(stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if sys.platform == "win32":
+            _popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+        self._ffmpeg_screen = subprocess.Popen(cmd, **_popen_kwargs)
         # Give ffmpeg a moment to fail fast (e.g. missing display)
         time.sleep(0.5)
         if self._ffmpeg_screen.poll() is not None:
@@ -287,18 +288,36 @@ class LiveRecorder:
             raise RuntimeError(f"ffmpeg screen capture failed to start: {err}")
 
     def _stop_ffmpeg(self, proc: subprocess.Popen) -> None:
+        """Gracefully stop ffmpeg so the output mp4 is finalized.
+
+        - Windows: CTRL_BREAK_EVENT (works because we launched with
+          CREATE_NEW_PROCESS_GROUP). Wait up to 15s.
+        - Other platforms or if Ctrl+Break didn't work: stdin 'q\\n'
+          + flush + close. Wait up to 15s.
+        - Last resort: proc.kill() (output file will be corrupt).
+        """
+        import signal as _sig
+        if sys.platform == "win32":
+            try:
+                proc.send_signal(_sig.CTRL_BREAK_EVENT)
+                proc.wait(timeout=15)
+                return
+            except (subprocess.TimeoutExpired, Exception) as e:
+                logger.warning("ffmpeg Ctrl+Break failed (%s), trying stdin 'q'...", e)
         try:
             if proc.stdin:
-                proc.stdin.write(b"q")
+                proc.stdin.write(b"q\n")
                 proc.stdin.flush()
+                proc.stdin.close()
+            proc.wait(timeout=15)
+            return
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.warning("ffmpeg didn't stop on stdin 'q' (%s), killing — output may be corrupt", e)
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
         except Exception:
             pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            logger.warning("ffmpeg didn't stop gracefully, killing...")
-            proc.kill()
-            proc.wait(timeout=5)
 
     def _finalize(self) -> Path:
         """Combine the recorded tracks into a single output file.

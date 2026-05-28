@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Video Transcriber</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="./style.css" />
+<script>
+// ---------- visible boot diagnostics (runs before Alpine / app.js) ----------
+window.__boot = [];
+window.__bootState = { collapsed: false, hasErrors: false };
+
+window.__expandBoot = function () {
+  var w = document.getElementById("boot-wrap");
+  var m = document.getElementById("boot-mini");
+  if (w) w.style.display = "block";
+  if (m) m.style.display = "none";
+  window.__bootState.collapsed = false;
+};
+window.__collapseBoot = function () {
+  var w = document.getElementById("boot-wrap");
+  var m = document.getElementById("boot-mini");
+  if (w) w.style.display = "none";
+  if (m) m.style.display = "flex";
+  window.__bootState.collapsed = true;
+};
+
+window.bootLog = function (msg, kind) {
+  try {
+    var b = (window.__boot = window.__boot || []);
+    b.push({ t: Date.now(), msg: String(msg), kind: kind || "info" });
+    var el = document.getElementById("boot-status");
+    if (el) {
+      var line = document.createElement("div");
+      line.textContent =
+        new Date().toLocaleTimeString() + " ["
+        + (kind || "info").toUpperCase() + "] " + msg;
+      if (kind === "err") line.style.color = "#ffb4b4";
+      else if (kind === "ok") line.style.color = "#b6f0c2";
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+    }
+    if (kind === "err") {
+      window.__bootState.hasErrors = true;
+      if (window.__expandBoot) window.__expandBoot();
+    }
+  } catch (e) { /* swallow */ }
+};
+window.addEventListener("error", function (e) {
+  bootLog(
+    "JS error: " + (e.message || "?") +
+    " @ " + (e.filename || "?") + ":" + (e.lineno || "?"),
+    "err"
+  );
+});
+window.addEventListener("unhandledrejection", function (e) {
+  bootLog("unhandled promise: " + (e.reason && e.reason.message || e.reason || "?"), "err");
+});
+window.addEventListener("DOMContentLoaded", function () {
+  bootLog("DOMContentLoaded");
+  // Auto-collapse after 4s if no errors.
+  setTimeout(function () {
+    if (!window.__bootState.hasErrors && !window.__bootState.collapsed) {
+      window.__collapseBoot();
+    }
+  }, 4000);
+});
+window.addEventListener("pywebviewready", function () { bootLog("pywebviewready event", "ok"); });
+bootLog("inline boot script ran");
+
+window.copyBootLog = function (btn) {
+  try {
+    var lines = (window.__boot || []).map(function (e) {
+      return new Date(e.t).toLocaleTimeString() + " [" + (e.kind || "info").toUpperCase() + "] " + e.msg;
+    }).join("\n");
+    navigator.clipboard.writeText(lines);
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = "✓ Copied";
+      setTimeout(function () { if (btn) btn.textContent = orig; }, 1200);
+    }
+  } catch (e) { /* swallow */ }
+};
+</script>
+<script defer src="./app.js" onerror="bootLog('app.js failed to load','err')"></script>
+<script defer src="./vendor/alpine.min.js" onerror="bootLog('alpine.min.js failed to load','err')"></script>
+</head>
+<body>
+<!-- Collapsed pill (hidden by default; shown after auto-collapse). -->
+<div id="boot-mini" onclick="window.__expandBoot()" style="display:none;position:fixed;right:14px;bottom:14px;z-index:99999;background:#1c212c;color:#cfd5e3;border:1px solid #353c4d;border-radius:18px;padding:6px 12px;font:12px/1 ui-monospace,Menlo,Consolas,monospace;cursor:pointer;align-items:center;gap:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+  🩺 diagnostics
+</div>
+
+<div id="boot-wrap" style="position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(10,12,16,0.95);border-top:1px solid #353c4d;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#cfd5e3;">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid #262b37;">
+    <div style="opacity:0.7;font-size:11px;">boot diagnostics</div>
+    <div style="display:flex;gap:6px;">
+      <button onclick="copyBootLog(this)" style="background:#1c212c;color:#cfd5e3;border:1px solid #353c4d;padding:3px 9px;border-radius:4px;font:11px/1 ui-monospace,Menlo,Consolas,monospace;cursor:pointer;">📋 Copy log</button>
+      <button onclick="window.__collapseBoot()" style="background:#1c212c;color:#cfd5e3;border:1px solid #353c4d;padding:3px 9px;border-radius:4px;font:11px/1 ui-monospace,Menlo,Consolas,monospace;cursor:pointer;">🔒 Hide</button>
+    </div>
+  </div>
+  <div id="boot-status" style="max-height:180px;overflow:auto;padding:6px 10px;"></div>
+</div>
+<div class="app" x-data="app()" x-cloak>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="dot"></span> Video Transcriber
+      <span class="ver" x-text="version"></span>
+    </div>
+    <template x-for="t in tabs" :key="t.id">
+      <div class="nav-item" :class="{active: tab===t.id}" @click="tab=t.id">
+        <span class="ico" x-text="t.icon"></span>
+        <span x-text="t.label"></span>
+      </div>
+    </template>
+    <div class="nav-spacer"></div>
+    <div class="nav-foot">
+      Fork of <a href="https://github.com/checkerup/video-transcriber" target="_blank">video-transcriber</a><br>
+      Diarization inspired by
+      <a href="https://github.com/dmarzzz/VoxTerm" target="_blank">VoxTerm</a>.
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <section class="main">
+    <header class="main-head">
+      <div>
+        <h1 x-text="activeTab().label"></h1>
+        <div class="sub" x-text="activeTab().sub"></div>
+      </div>
+      <div class="gap-sm">
+        <button class="btn ghost" @click="refreshAll()" title="Refresh">↻</button>
+      </div>
+    </header>
+
+    <div class="main-body">
+
+      <!-- ========== PROCESS tab ========== -->
+      <div x-show="tab==='process'">
+        <div class="card">
+          <h2>Source</h2>
+          <div class="dropzone"
+               :class="{dragover: dragHot}"
+               @click="pickFile()"
+               @dragover.prevent="dragHot=true"
+               @dragleave.prevent="dragHot=false"
+               @drop.prevent="onDrop($event)">
+            <div class="big">📥</div>
+            <div><b>Click to browse</b> for a video or audio file</div>
+            <div class="tiny muted" style="margin-top:6px">(drag-drop isn't supported by pywebview yet)</div>
+            <div class="file" x-show="process.file" x-text="process.file"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Pipeline options</h2>
+          <div class="row">
+            <label class="field">
+              <span class="lbl">Whisper model</span>
+              <select x-model="process.model_size">
+                <option value="">— from config —</option>
+                <option>tiny</option><option>base</option><option>small</option>
+                <option>medium</option><option>large-v3</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lbl">Language hint</span>
+              <input type="text" x-model="process.language" placeholder="ru / en / auto" />
+            </label>
+            <label class="field">
+              <span class="lbl">Translate to (optional)</span>
+              <input type="text" x-model="process.translate_to" placeholder="empty = no" />
+            </label>
+            <label class="field">
+              <span class="lbl">Summarize</span>
+              <label class="toggle" style="padding:0">
+                <input type="checkbox" x-model="process.summarize" />
+                <span x-text="process.summarize ? 'on (gemini)' : 'off'"></span>
+              </label>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Diarization</h2>
+          <div class="row">
+            <label class="field">
+              <span class="lbl">Enabled</span>
+              <label class="toggle" style="padding:0">
+                <input type="checkbox" x-model="process.diarize" />
+                <span x-text="process.diarize ? 'yes' : 'no'"></span>
+              </label>
+            </label>
+            <label class="field">
+              <span class="lbl">Backend</span>
+              <select x-model="process.diar_backend" :disabled="!process.diarize">
+                <option value="">— from config —</option>
+                <option value="voxterm">voxterm (offline)</option>
+                <option value="pyannote">pyannote (HF token)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lbl">Model</span>
+              <select x-model="process.diar_model" :disabled="!process.diarize">
+                <option value="">— from config —</option>
+                <option value="cam++">CAM++ (fast)</option>
+                <option value="eres2net">ERes2NetV2 (accurate)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lbl">Force # speakers (optional)</span>
+              <input type="number" min="1" max="50" x-model.number="process.num_speakers"
+                     :disabled="!process.diarize" placeholder="auto" />
+            </label>
+            <label class="field">
+              <span class="lbl">
+                Cluster threshold
+                <b class="mono tiny" x-text="(+process.cluster_threshold || 0.7).toFixed(2)"></b>
+              </span>
+              <input type="range" min="0.3" max="0.9" step="0.05"
+                     x-model.number="process.cluster_threshold"
+                     :disabled="!process.diarize" />
+              <span class="tiny muted">higher = fewer speakers; 0.7 default</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn primary" @click="startProcess()"
+                  :disabled="!process.file || activeJob">
+            ▶ Start
+          </button>
+          <button class="btn danger" @click="cancelActive()"
+                  x-show="activeJob && activeJob.status==='running'">
+            ✕ Cancel
+          </button>
+          <span class="spacer"></span>
+          <span class="muted tiny" x-show="!process.file">Pick a file first.</span>
+        </div>
+
+        <!-- Active job panel -->
+        <template x-if="activeJob">
+          <div class="card" style="margin-top:18px">
+            <h2>
+              Active job
+              <span class="pill" :class="activeJob.status" x-text="activeJob.status"></span>
+            </h2>
+            <div class="mono tiny muted" x-text="activeJob.file_path"></div>
+            <div class="progress" :class="{indeterminate: activeJob.progress<=0.01 && activeJob.status==='running'}">
+              <div class="bar" :style="`width:${Math.max(0,Math.min(1,activeJob.progress))*100}%`"></div>
+            </div>
+            <div class="kv">
+              <span>Stage: <b x-text="activeJob.stage || '—'"></b></span>
+              <span>Progress: <b x-text="(activeJob.progress*100).toFixed(1)+'%'"></b></span>
+              <span>Elapsed: <b x-text="activeJob.elapsed_human"></b></span>
+              <span x-show="activeJob.eta_human">ETA: <b x-text="activeJob.eta_human"></b></span>
+            </div>
+            <div class="log" x-ref="log">
+              <template x-for="(line, i) in activeJob.log_tail" :key="i">
+                <div :class="{err: /ERROR|Traceback/.test(line)}" x-text="line"></div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ========== LIVE tab ========== -->
+      <div x-show="tab==='live'">
+        <div class="card">
+          <h2>Mode</h2>
+          <div class="row">
+            <template x-for="m in liveModes" :key="m.id">
+              <label class="field">
+                <span class="lbl" style="display:flex;align-items:center;gap:8px">
+                  <input type="radio" :value="m.id" x-model="live.mode" :disabled="live.active"/>
+                  <b x-text="m.label"></b>
+                </span>
+                <span class="tiny muted" x-text="m.hint"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn primary" @click="startLive()" :disabled="live.active">
+            🔴 Start recording
+          </button>
+          <button class="btn danger" @click="stopLive()" x-show="live.active">
+            ⏹ Stop &amp; transcribe
+          </button>
+          <span class="spacer"></span>
+          <span class="muted tiny" x-show="live.active">
+            Recording started at <b x-text="new Date(live.startedAt*1000).toLocaleTimeString()"></b>
+          </span>
+        </div>
+
+        <div class="card" x-show="live.lastOutput">
+          <h2>Last recording</h2>
+          <div class="mono tiny" x-text="live.lastOutput"></div>
+        </div>
+      </div>
+
+      <!-- ========== HISTORY tab ========== -->
+      <div x-show="tab==='history'">
+        <div class="card">
+          <h2>Past runs <span class="muted tiny" x-text="`(${history.length})`"></span></h2>
+          <template x-if="history.length===0">
+            <div class="muted tiny">No timing reports yet. Run something first.</div>
+          </template>
+          <template x-for="h in history" :key="h.name">
+            <div class="history-item">
+              <div>
+                <div class="name" x-text="h.name"></div>
+                <div class="meta">
+                  <span>Processed in <b x-text="h.total_elapsed_human || '—'"></b></span>
+                  <span x-show="h.speedup_vs_source">
+                    · speedup <b x-text="h.speedup_vs_source.toFixed(2)+'×'"></b>
+                  </span>
+                  <span x-show="h.source_duration_seconds">
+                    · source <b x-text="formatSec(h.source_duration_seconds)"></b>
+                  </span>
+                </div>
+              </div>
+              <button class="btn ghost" @click="openTranscript(h)">View</button>
+              <button class="btn" @click="openRetag(h)">Retag…</button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ========== SETTINGS tab ========== -->
+      <div x-show="tab==='settings'">
+        <div class="card">
+          <h2>Folders</h2>
+          <div class="row">
+            <label class="field" style="min-width:280px">
+              <span class="lbl">Watch folder</span>
+              <input type="text" :value="config?.watch?.folder || ''" readonly />
+            </label>
+            <label class="field" style="min-width:280px">
+              <span class="lbl">Output folder</span>
+              <input type="text" :value="config?.processing?.output_folder || ''" readonly />
+            </label>
+          </div>
+          <div class="tiny muted" style="margin-top:8px">
+            Edit values in the raw YAML below, then click Save.
+          </div>
+        </div>
+
+        <!-- ===== AI / LLM card ===== -->
+        <div class="card">
+          <h2>AI / LLM (for summarization &amp; future LLM features)</h2>
+          <div class="tiny muted" style="margin-bottom:10px">
+            Pick a provider, paste an API key, and choose a model. The same settings drive
+            transcript summarization and any future LLM-powered features.
+          </div>
+          <div class="row">
+            <label class="field">
+              <span class="lbl">Provider</span>
+              <select x-model="settings.llm.provider">
+                <option value="gemini">Gemini (Google)</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="custom">Custom (OpenAI-compatible)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lbl">Model</span>
+              <input type="text" x-model="settings.llm.model" placeholder="e.g. gemini-1.5-flash" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field grow">
+              <span class="lbl">API key</span>
+              <input type="password" x-model="settings.llm.api_key" placeholder="paste key, or leave empty to use env var" />
+            </label>
+            <label class="field" x-show="settings.llm.provider === 'custom'">
+              <span class="lbl">API base URL</span>
+              <input type="text" x-model="settings.llm.api_base" placeholder="https://your.endpoint/v1" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span class="lbl">Temperature</span>
+              <input type="number" step="0.05" min="0" max="2" x-model.number="settings.llm.temperature" />
+            </label>
+            <label class="field">
+              <span class="lbl">Max output tokens</span>
+              <input type="number" step="256" min="64" max="200000" x-model.number="settings.llm.max_output_tokens" />
+            </label>
+            <label class="field">
+              <span class="lbl">Output language</span>
+              <select x-model="settings.llm.language">
+                <option value="auto">Auto (match transcript)</option>
+                <option value="ru">Russian</option>
+                <option value="en">English</option>
+                <option value="zh">Chinese</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+              </select>
+            </label>
+          </div>
+          <label class="field" style="margin-top:10px">
+            <span class="lbl">System prompt (optional)</span>
+            <textarea rows="2" x-model="settings.llm.system_prompt" placeholder="e.g. You are a precise meeting summarizer..."></textarea>
+          </label>
+          <label class="field" style="margin-top:10px">
+            <span class="lbl">User prompt (optional, use {text} for the transcript)</span>
+            <textarea rows="4" x-model="settings.llm.prompt" placeholder="Leave empty for the built-in default"></textarea>
+          </label>
+          <div class="row" style="margin-top:10px">
+            <button class="btn" @click="saveLLM()">💾 Save AI settings</button>
+            <button class="btn ghost" @click="testLLM()" :disabled="!settings.llm.api_key && settings.llm.provider !== 'custom'">🧪 Test connection</button>
+            <span class="tiny muted" x-show="settings.llm.savedAt"
+                  x-text="`Saved ${new Date(settings.llm.savedAt).toLocaleTimeString()}`"></span>
+            <span class="tiny" x-show="settings.llm.testResult"
+                  :class="settings.llm.testResult.ok ? 'ok' : 'err'"
+                  x-text="settings.llm.testResult ? settings.llm.testResult.msg : ''"></span>
+          </div>
+        </div>
+
+        <!-- ===== Telegram card ===== -->
+        <div class="card">
+          <h2>Telegram</h2>
+          <div class="row">
+            <label class="field" style="min-width:280px">
+              <span class="lbl">Bot token</span>
+              <input type="password" autocomplete="off"
+                     x-model="settings.tg.bot_token"
+                     placeholder="123456:ABC…" />
+            </label>
+            <label class="field" style="min-width:200px">
+              <span class="lbl">Chat ID</span>
+              <input type="text" x-model="settings.tg.chat_id"
+                     placeholder="-1001234567890" />
+            </label>
+          </div>
+
+          <div class="field" style="margin-top:10px">
+            <span class="lbl">Send transcript</span>
+            <div class="row" style="gap:18px">
+              <label class="radio">
+                <input type="radio" value="file" x-model="settings.tg.send_transcript" />
+                <span>📎 As file (default)</span>
+              </label>
+              <label class="radio">
+                <input type="radio" value="text" x-model="settings.tg.send_transcript" />
+                <span>💬 Inline text</span>
+              </label>
+              <label class="radio">
+                <input type="radio" value="none" x-model="settings.tg.send_transcript" />
+                <span>🚫 Don't send</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:10px">
+            <span class="lbl">Also attach</span>
+            <div class="row" style="gap:18px; flex-wrap:wrap">
+              <label class="check">
+                <input type="checkbox" x-model="settings.tg.send_summary_file" />
+                <span>📖 Summary file</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" x-model="settings.tg.attach_audio" />
+                <span>🎧 Audio</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" x-model="settings.tg.attach_video" />
+                <span>🎬 Video</span>
+              </label>
+            </div>
+            <div class="tiny muted" style="margin-top:6px">
+              Heavy attachments are skipped automatically if they exceed Telegram's
+              50 MB bot upload limit.
+            </div>
+          </div>
+
+          <div class="btn-row" style="margin-top:14px">
+            <button class="btn primary" @click="saveTelegram()">💾 Save Telegram</button>
+            <button class="btn ghost" @click="testTelegram()">📤 Send test message</button>
+            <span class="spacer"></span>
+            <span class="tiny muted" x-show="settings.tg.savedAt"
+                  x-text="`Saved ${new Date(settings.tg.savedAt).toLocaleTimeString()}`"></span>
+            <span class="tiny" :class="settings.tg.testResult==='ok' ? 'ok' : 'err'"
+                  x-show="settings.tg.testResult"
+                  x-text="settings.tg.testResult==='ok' ? '✓ sent' : ('✗ ' + settings.tg.testResult)"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Raw config.yaml</h2>
+          <textarea class="yaml" x-model="settings.yaml" spellcheck="false"></textarea>
+          <div class="btn-row">
+            <button class="btn primary" @click="saveYaml()">💾 Save</button>
+            <button class="btn ghost" @click="reloadYaml()">↻ Reload from disk</button>
+            <span class="spacer"></span>
+            <span class="tiny muted" x-show="settings.savedAt"
+                  x-text="`Saved ${new Date(settings.savedAt).toLocaleTimeString()}`"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== SYSTEM tab ========== -->
+      <div x-show="tab==='system'">
+        <div class="card">
+          <h2>Hardware</h2>
+          <pre class="mono tiny" style="white-space:pre-wrap" x-text="JSON.stringify(hardware,null,2)"></pre>
+        </div>
+        <div class="card">
+          <h2>Active job log</h2>
+          <div class="log">
+            <template x-for="(line, i) in logTail" :key="i">
+              <div x-text="line"></div>
+            </template>
+            <div x-show="logTail.length===0" class="muted">No active job.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Drawer: transcript / retag -->
+  <template x-if="drawer.open">
+    <div>
+      <div class="drawer-bg" @click="drawer.open=false"></div>
+      <div class="drawer">
+        <div class="head">
+          <div>
+            <div class="mono tiny" x-text="drawer.name"></div>
+            <div class="tiny muted" x-text="drawer.mode==='retag' ? 'Re-tag speakers' : 'Transcript'"></div>
+          </div>
+          <button class="btn ghost" @click="drawer.open=false">✕</button>
+        </div>
+        <div class="body">
+          <!-- Retag mode -->
+          <div x-show="drawer.mode==='retag'">
+            <div class="card">
+              <h2>Re-cluster speakers (no Whisper re-run)</h2>
+              <div class="row">
+                <label class="field">
+                  <span class="lbl"># speakers (optional)</span>
+                  <input type="number" min="1" max="50" x-model.number="drawer.num_speakers" placeholder="auto" />
+                </label>
+                <label class="field">
+                  <span class="lbl">
+                    Cluster threshold
+                    <b class="mono tiny" x-text="(+drawer.cluster_threshold || 0.7).toFixed(2)"></b>
+                  </span>
+                  <input type="range" min="0.3" max="0.9" step="0.05"
+                         x-model.number="drawer.cluster_threshold" />
+                </label>
+              </div>
+              <div class="btn-row">
+                <button class="btn primary" @click="runRetag()">▶ Run retag</button>
+              </div>
+            </div>
+          </div>
+          <!-- Transcript mode -->
+          <div x-show="drawer.mode==='view'">
+            <div class="gap-sm" style="margin-bottom:10px">
+              <template x-for="p in drawer.transcripts" :key="p">
+                <button class="btn ghost tiny" @click="loadTranscript(p)" x-text="basename(p)"></button>
+              </template>
+            </div>
+            <pre class="transcript" x-text="drawer.transcript || '(empty)'"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Toasts -->
+  <div class="toast-wrap">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="toast" :class="t.kind" x-text="t.text"></div>
+    </template>
+  </div>
+
+</div>
+</body>
+</html>

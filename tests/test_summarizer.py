@@ -133,3 +133,130 @@ def test_generate_summary_custom_prompt(mock_post):
     prompt_text = json_data["contents"][0]["parts"][0]["text"]
     assert prompt_text == "Summarize in one sentence: Detailed transcription text here."
 
+"""Tests for the multi-provider summarizer."""
+
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+from video_transcriber.config import AppConfig, SummarizationConfig
+from video_transcriber.summarizer import generate_summary, _build_prompt, _language_clause
+
+
+def _make_cfg(provider="gemini", api_key="k", model="m", api_base=""):
+    return AppConfig(summarization=SummarizationConfig(
+        enabled=True, provider=provider, api_key=api_key, model=model, api_base=api_base,
+    ))
+
+
+def test_disabled_returns_empty():
+    cfg = _make_cfg()
+    cfg.summarization.enabled = False
+    assert generate_summary("hi", cfg) == ""
+
+
+def test_empty_text_returns_empty():
+    assert generate_summary("", _make_cfg()) == ""
+
+
+def test_no_api_key_returns_empty():
+    cfg = _make_cfg(api_key="")
+    assert generate_summary("hi", cfg) == ""
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_gemini_provider(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"candidates": [{"content": {"parts": [{"text": "summary OK"}]}}]},
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+    out = generate_summary("hello", _make_cfg("gemini"))
+    assert out == "summary OK"
+    url = mock_post.call_args[0][0]
+    assert "generativelanguage.googleapis.com" in url
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_openai_provider(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"choices": [{"message": {"content": "openai summary"}}]},
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+    out = generate_summary("hi", _make_cfg("openai"))
+    assert out == "openai summary"
+    assert "api.openai.com" in mock_post.call_args[0][0]
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_anthropic_provider(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"content": [{"type": "text", "text": "claude summary"}]},
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+    out = generate_summary("hi", _make_cfg("anthropic"))
+    assert out == "claude summary"
+    assert "api.anthropic.com" in mock_post.call_args[0][0]
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_openrouter_provider(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"choices": [{"message": {"content": "router summary"}}]},
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+    out = generate_summary("hi", _make_cfg("openrouter"))
+    assert out == "router summary"
+    assert "openrouter.ai" in mock_post.call_args[0][0]
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_custom_provider_requires_api_base(mock_post):
+    cfg = _make_cfg("custom", api_base="")
+    assert generate_summary("hi", cfg) == ""
+    mock_post.assert_not_called()
+
+
+@patch("video_transcriber.summarizer.requests.post")
+def test_custom_provider_uses_api_base(mock_post):
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"choices": [{"message": {"content": "custom summary"}}]},
+    )
+    mock_post.return_value.raise_for_status = MagicMock()
+    cfg = _make_cfg("custom", api_base="https://my.llm.host/v1", api_key="k")
+    out = generate_summary("hi", cfg)
+    assert out == "custom summary"
+    assert mock_post.call_args[0][0] == "https://my.llm.host/v1/chat/completions"
+
+
+def test_unknown_provider_returns_empty():
+    assert generate_summary("hi", _make_cfg("does-not-exist")) == ""
+
+
+def test_build_prompt_uses_default_when_empty():
+    cfg = _make_cfg()
+    sys_p, user_p = _build_prompt("transcript text", cfg)
+    assert "expert summarizer" in sys_p.lower()
+    assert "transcript text" in user_p
+
+
+def test_build_prompt_with_text_placeholder():
+    cfg = _make_cfg()
+    cfg.summarization.prompt = "Summarize:\n{text}"
+    sys_p, user_p = _build_prompt("hello", cfg)
+    assert user_p.startswith("Summarize:")
+    assert "hello" in user_p
+
+
+def test_language_clause_known():
+    assert "Russian" in _language_clause("ru")
+    assert "Chinese" in _language_clause("zh")
+
+
+def test_language_clause_auto():
+    assert "same language" in _language_clause("auto").lower()
+    assert "same language" in _language_clause("").lower()

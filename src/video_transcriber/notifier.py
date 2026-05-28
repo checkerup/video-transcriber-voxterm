@@ -107,7 +107,17 @@ def send_notification(
             payload["text"] = base_text
             resp = requests.post(url, json=payload, timeout=15)
             resp.raise_for_status()
-            
+
+        # Optional attachments (only on success — never on error path).
+        if error is None:
+            _attach_optional_files(
+                config=config,
+                transcript_path=transcript_path,
+                summary_path=summary_path,
+                audio_path=audio_path,
+                video_path=video_path,
+            )
+
         logger.info("Telegram notification sent successfully")
         return True
     except requests.RequestException as e:
@@ -143,3 +153,87 @@ def _send_message_in_chunks(url: str, payload: dict, text_to_send: str) -> None:
         resp = requests.post(url, json=payload, timeout=15)
         resp.raise_for_status()
 
+
+# ---------- attachments ----------
+
+_DOC_URL = "https://api.telegram.org/bot{token}/sendDocument"
+
+
+def _attach_optional_files(
+    config: AppConfig,
+    *,
+    transcript_path,
+    summary_path,
+    audio_path,
+    video_path,
+) -> None:
+    """Send any optional documents (transcript / summary / audio / video) if enabled in config."""
+    token = config.telegram.bot_token
+    chat_id = config.telegram.chat_id
+    max_bytes = int(config.telegram.max_attachment_mb) * 1024 * 1024
+    mode = (config.telegram.send_transcript or "file").lower().strip()
+
+    if transcript_path is not None and mode == "file":
+        _send_document(token, chat_id, Path(str(transcript_path)),
+                       caption="📝 Расшифровка", max_bytes=max_bytes)
+    elif transcript_path is not None and mode == "text":
+        _send_transcript_as_text(token, chat_id, Path(str(transcript_path)))
+
+    if config.telegram.send_summary_file and summary_path is not None:
+        _send_document(token, chat_id, Path(str(summary_path)),
+                       caption="📖 Саммари", max_bytes=max_bytes)
+
+    if config.telegram.attach_audio and audio_path is not None:
+        _send_document(token, chat_id, Path(str(audio_path)),
+                       caption="🎧 Аудио", max_bytes=max_bytes)
+
+    if config.telegram.attach_video and video_path is not None:
+        _send_document(token, chat_id, Path(str(video_path)),
+                       caption="🎬 Видео", max_bytes=max_bytes)
+
+
+def _send_document(token: str, chat_id: int, file_path: Path, caption: str, max_bytes: int) -> None:
+    """Upload a single file via Telegram sendDocument; soft-fail with a log."""
+    try:
+        if not file_path.exists():
+            logger.warning("Telegram attach: file not found: %s", file_path)
+            return
+        size = file_path.stat().st_size
+        if size > max_bytes:
+            logger.warning(
+                "Telegram attach: skipping %s (%.1f MB > limit %.0f MB)",
+                file_path, size / 1024 / 1024, max_bytes / 1024 / 1024,
+            )
+            return
+        with file_path.open("rb") as fh:
+            files = {"document": (file_path.name, fh)}
+            data = {
+                "chat_id": chat_id,
+                "caption": f"{html.escape(caption)} <code>{html.escape(file_path.name)}</code>",
+                "parse_mode": "HTML",
+            }
+            resp = requests.post(
+                _DOC_URL.format(token=token),
+                files=files, data=data, timeout=60,
+            )
+            resp.raise_for_status()
+        logger.info("Telegram attach: sent %s", file_path.name)
+    except Exception as e:  # noqa: BLE001 - never let attachments break notifications
+        logger.error("Telegram attach: %s failed: %s", file_path, e)
+
+
+def _send_transcript_as_text(token: str, chat_id: int, file_path: Path) -> None:
+    """Inline the transcript text into one or more sendMessage calls (4000 ch chunks)."""
+    try:
+        if not file_path.exists():
+            logger.warning("Telegram text: transcript not found: %s", file_path)
+            return
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            return
+        url = _API_BASE.format(token=token) + "/sendMessage"
+        payload = {"chat_id": chat_id, "parse_mode": "HTML"}
+        header = "📝 <b>Расшифровка:</b>\n"
+        _send_message_in_chunks(url, payload, header + html.escape(text))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Telegram text: send failed: %s", e)
