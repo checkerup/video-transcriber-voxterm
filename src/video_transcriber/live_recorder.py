@@ -254,14 +254,18 @@ class LiveRecorder:
                 "ffmpeg",
                 "-f", "gdigrab", "-framerate", str(fps), "-i", "desktop",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-                "-pix_fmt", "yuv420p", "-an", "-y", str(out_path),
+                "-pix_fmt", "yuv420p", "-an",
+                "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+                "-y", str(out_path),
             ]
         elif os_name == "Darwin":
             cmd = [
                 "ffmpeg",
                 "-f", "avfoundation", "-framerate", str(fps), "-i", "1",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-                "-pix_fmt", "yuv420p", "-an", "-y", str(out_path),
+                "-pix_fmt", "yuv420p", "-an",
+                "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+                "-y", str(out_path),
             ]
         else:
             # Linux: x11grab. Headless? Then the user shouldn't be in screen mode.
@@ -271,7 +275,9 @@ class LiveRecorder:
                 "-f", "x11grab", "-framerate", str(fps), "-video_size", video_size,
                 "-i", ":0.0",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-                "-pix_fmt", "yuv420p", "-an", "-y", str(out_path),
+                "-pix_fmt", "yuv420p", "-an",
+                "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+                "-y", str(out_path),
             ]
 
         logger.info("Screen capture starting -> %s (fps=%s)", out_path, fps)
