@@ -25,6 +25,15 @@ transcription:
 telegram:
   bot_token: ""
   chat_id: ""
+  # How to deliver the transcript itself:
+  #   "file" — attach the produced .txt/.srt/.vtt as a Telegram document (default).
+  #   "text" — paste the transcript text inline in chunked messages.
+  #   "none" — only send the short metadata message.
+  send_transcript: "file"
+  send_summary_file: false
+  attach_audio: false
+  attach_video: false
+  max_attachment_mb: 20
 
 recorder:
   fps: 30
@@ -36,10 +45,35 @@ process_watcher:
 
 summarization:
   enabled: false
+  # Provider: "gemini" (default), "openai", "anthropic", "openrouter",
+  # or "custom" (any OpenAI-compatible endpoint via api_base).
   provider: "gemini"
+  # API key for the chosen provider. If empty, falls back to env vars:
+  #   gemini     -> GEMINI_API_KEY or GOOGLE_API_KEY
+  #   openai     -> OPENAI_API_KEY
+  #   anthropic  -> ANTHROPIC_API_KEY
+  #   openrouter -> OPENROUTER_API_KEY
   api_key: ""
+  # Base URL for the API endpoint. If empty, uses the provider's default.
+  api_base: ""
+  # Model name for the chosen provider.
   model: "gemini-1.5-flash"   # can be changed to any Gemini model (e.g. gemini-1.5-pro, gemini-2.0-flash-exp)
-  prompt: ""                  # custom prompt, can contain {text} placeholder for the transcript content
+  # Custom prompt for the LLM. Can contain {text} placeholder for the transcript content.
+  prompt: ""
+  # System prompt for the LLM.
+  system_prompt: ""
+  # Maximum number of tokens to generate.
+  max_tokens: 0
+  # Temperature for the LLM.
+  temperature: 0.0
+  # Top-p sampling parameter.
+  top_p: 0.0
+  # Top-k sampling parameter.
+  top_k: 0
+  # Number of retries for the LLM.
+  retries: 0
+  # Whether to stream the LLM output.
+  stream: false
 
 # Speaker diarization (who-said-what). Two backends are supported.
 diarization:
