@@ -125,9 +125,9 @@ class LiveRecorder:
         """Stop all sub-recorders and produce a single final media file.
 
         Returns the path to the final media file:
-          - voice  : <session>/audio.wav
-          - screen : <session>/recording.mp4
-          - full   : <session>/recording.mp4
+          - voice  : <session>/<session>.wav
+          - screen : <session>/<session>.mp4
+          - full   : <session>/<session>.mp4
         """
         if self._stop_event.is_set():
             return self._final_path
@@ -328,13 +328,13 @@ class LiveRecorder:
     def _finalize(self) -> Path:
         """Combine the recorded tracks into a single output file.
 
-        - voice : just the mic WAV (renamed audio.wav)
-        - screen: mux screen.mp4 + mic.wav -> recording.mp4
+        - voice : just the mic WAV (renamed to <session>.wav)
+        - screen: mux screen.mp4 + mic.wav -> <session>.mp4
         - full  : mix mic.wav + system.wav -> mixed.wav, then mux with
-                  screen.mp4 -> recording.mp4
+                  screen.mp4 -> <session>.mp4
         """
         if self.mode == "voice":
-            final = self.session_dir / "audio.wav"
+            final = self.session_dir / f"{self.session_dir.name}.wav"
             if self._mic_path and self._mic_path.exists():
                 if self._mic_path.resolve() != final.resolve():
                     shutil.move(str(self._mic_path), str(final))
@@ -348,7 +348,7 @@ class LiveRecorder:
         else:
             audio_track = self._mic_path
 
-        final = self.session_dir / "recording.mp4"
+        final = self.session_dir / f"{self.session_dir.name}.mp4"
         self._ffmpeg_mux(self._screen_path, audio_track, final)
         return final
 

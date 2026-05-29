@@ -75,3 +75,27 @@ def test_invalid_mode_in_run_helper(tmp_path):
     cfg = AppConfig(processing=ProcessingConfig(output_folder=str(tmp_path)))
     with pytest.raises(ValueError):
         run_live_recording(cfg, mode="not-a-real-mode")
+
+
+def test_finalize_voice_uses_unique_session_name(tmp_path):
+    """voice-mode finalize must name the file after the unique session dir,
+    not a fixed 'audio.wav' (which collides across sessions)."""
+    import wave
+
+    cfg = AppConfig(processing=ProcessingConfig(output_folder=str(tmp_path)))
+    rec = LiveRecorder(cfg, mode="voice")
+
+    # simulate a recorded mic track
+    mic = rec.session_dir / "mic.wav"
+    with wave.open(str(mic), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 1600)
+    rec._mic_path = mic
+
+    final = rec._finalize()
+    # final filename must equal "<session_dir_name>.wav", not "audio.wav"
+    assert final.name == f"{rec.session_dir.name}.wav"
+    assert final.name != "audio.wav"
+    assert final.exists()
