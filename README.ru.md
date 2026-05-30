@@ -1,5 +1,20 @@
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Русский](https://img.shields.io/badge/lang-Русский-red.svg)](README.ru.md) [![中文](https://img.shields.io/badge/lang-中文-green.svg)](README.zh.md)
 
+> **Это форк** [`checkerup/video-transcriber`](https://github.com/checkerup/video-transcriber),
+> в который добавлены **оффлайн-диаризация спикеров** (кто-что-сказал, без HF-токена)
+> и **режим live-записи** (микрофон / микрофон+экран / микрофон+экран+системный звук,
+> с автоматической расшифровкой по нажатию `Ctrl+C`).
+>
+> Пайплайн диаризации вдохновлён [`VoxTerm`](https://github.com/dmarzzz/VoxTerm)
+> от [@dmarzzz](https://github.com/dmarzzz) — полная атрибуция в [`NOTICE.md`](NOTICE.md).
+
+> 🎨 **Хотите GUI?**
+> Десктопная версия (PyWebView, drag-and-drop файлов, живой прогресс-бар, формы настроек,
+> история, кнопка пересборки спикеров) — в ветке
+> [`feat/desktop-ui`](https://github.com/checkerup/video-transcriber-voxterm/tree/feat/desktop-ui).
+> Эта ветка — только CLI.
+
+
 # Video Transcriber
 
 Автоматическая расшифровка видео: следит за папкой или запуском программ, записывает экран, транскрибирует локально (бесплатно!), шлет уведомление в Telegram.
@@ -15,17 +30,22 @@
 - **Экстракция аудио** — FFmpeg вытягивает MP3 без перекодирования
 - **Транскрибация** — faster-whisper (локально, бесплатно, приватно) с таймкодами
 - **Уведомления** — Telegram-бот сообщает когда готово
+- **🤖 Мульти-провайдерный LLM-саммари** — Gemini, OpenAI, Anthropic, OpenRouter, или любой OpenAI-совместимый эндпойнт (через `api_base`).
+- **📎 Опциональные вложения в Telegram** — расшифровка (файл или текстом), summary .md, аудио, видео — всё переключается флажками.
+- **🔁 Retag-speakers** — пере-кластеризация спикеров на существующем транскрипте без повторного запуска Whisper (`--retag-speakers PATH --num-speakers N`).
 - **Автозапуск** — установка в автозапуск одной командой (Windows/macOS/Linux)
 - **Интерактивное меню** — `menu.bat` / `menu.sh` со всеми режимами
 - **Кроссплатформенный** — Windows, macOS, Linux
+- **Оффлайн-диаризация спикеров** — sherpa-onnx + 3D-Speaker (CAM++ / ERes2NetV2) + pyannote-3.0 segmentation. Полностью локально, без HF-токена, модели подкачиваются автоматически при первом запуске (~30 МБ). Вдохновлено VoxTerm.
+- **Режим live-записи** — `--record-live voice|screen|full` пишет микрофон (опционально + экран + системный звук), при остановке автоматически транскрибирует. На Windows используется WASAPI loopback, **VB-Cable не нужен**.
 
 ## Быстрый старт
 
 ### Windows
 
 ```bat
-git clone https://github.com/checkerup/video-transcriber.git
-cd video-transcriber
+git clone https://github.com/checkerup/video-transcriber-voxterm.git
+cd video-transcriber-voxterm
 install.bat
 menu.bat
 ```
@@ -33,8 +53,8 @@ menu.bat
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/checkerup/video-transcriber.git
-cd video-transcriber
+git clone https://github.com/checkerup/video-transcriber-voxterm.git
+cd video-transcriber-voxterm
 chmod +x install.sh menu.sh start.sh stop.sh
 ./install.sh
 ./menu.sh
@@ -279,6 +299,9 @@ video-transcriber/
 │   ├── process_watcher.py   # слежка за процессами (psutil)
 │   ├── screen_recorder.py   # запись экрана (FFmpeg)
 │   ├── config.py            # загрузка конфига (YAML + .env)
+│   ├── diarizer.py          # диспетчер диаризации (voxterm | pyannote)
+│   ├── diarizer_voxterm.py  # оффлайн-диаризация (sherpa-onnx, в стиле VoxTerm)
+│   ├── live_recorder.py     # live-запись микрофон/экран/полный + авто-транскрипт
 │   ├── watcher.py           # слежка за папкой (watchdog)
 │   ├── extractor.py         # FFmpeg → MP3
 │   ├── transcriber.py       # faster-whisper транскрибация
@@ -295,6 +318,119 @@ video-transcriber/
 ├── requirements.txt         # зависимости
 └── LICENSE                  # MIT
 ```
+
+## Диаризация спикеров (кто-что-сказал)
+
+Доступно два бэкенда, переключаются в `config.yaml` в секции `diarization:`.
+
+### Бэкенд `voxterm` — *по умолчанию, полностью оффлайн, без HF-токена* ⭐
+
+Использует [`sherpa-onnx`](https://github.com/k2-fsa/sherpa-onnx) с моделью
+сегментации pyannote-3.0 + модель эмбеддингов 3D-Speaker (по умолчанию CAM++,
+опционально ERes2NetV2). Вдохновлено [`VoxTerm`](https://github.com/dmarzzz/VoxTerm) —
+полная атрибуция в [`NOTICE.md`](NOTICE.md).
+
+```bash
+pip install video-transcriber[diarization-voxterm]
+```
+
+```yaml
+diarization:
+  enabled: true
+  backend: "voxterm"      # по умолчанию
+  model: "cam++"          # или "eres2net"
+  cluster_threshold: 0.5  # ниже = больше спикеров, выше = меньше
+  num_speakers: null      # задайте число если знаете точное количество спикеров
+```
+
+Модели (~30 МБ) скачиваются один раз в `~/.cache/video-transcriber/diarization/`
+и далее переиспользуются оффлайн.
+
+### Бэкенд `pyannote` — *legacy, нужен HF-токен*
+
+Оригинальный бэкенд через gated-пайплайн `pyannote/speaker-diarization-3.1`.
+Требуется HuggingFace токен и принятие условий модели на HF.
+
+```bash
+pip install video-transcriber[diarization-pyannote]
+```
+
+```yaml
+diarization:
+  enabled: true
+  backend: "pyannote"
+  hf_token: "hf_xxx"
+```
+
+### Выход
+
+Строки транскрипта помечаются ярлыком спикера:
+
+```
+[00:00:03 → Спикер 1] Привет, как дела?
+[00:00:05 → Спикер 2] Норм, успел посмотреть...
+[00:00:09 → Спикер 1] Да, кстати...
+```
+
+В SRT / VTT ярлык спикера попадает в текст реплики.
+
+## Режим live-записи
+
+Запиши аудио (и опционально экран) прямо из терминала и получи
+транскрипт с диаризацией по `Ctrl+C`.
+
+```bash
+# только микрофон -> .wav + транскрипт
+python -m video_transcriber.main --record-live voice
+
+# экран + микрофон -> .mp4 + транскрипт
+python -m video_transcriber.main --record-live screen
+
+# экран + микрофон + системный звук -> .mp4 + транскрипт
+# (идеально для Zoom / Meet — слышно и тебя, и собеседника)
+python -m video_transcriber.main --record-live full
+```
+
+Результат сохраняется в папку с таймстампом внутри `processing.output_folder`:
+
+```
+recordings/2026-05-28_04-15-22/
+├── audio.wav           # микс микрофон + системный звук (mono 16k)
+├── screen.mp4          # только для screen / full
+├── transcript.txt      # транскрипт с разметкой спикеров
+└── transcript.srt      # субтитры с ярлыками спикеров
+```
+
+### Системный звук (`full`) — нюансы по ОС
+
+| ОС | Как работает | Доп. установка |
+|---|---|---|
+| **Windows 10/11** | WASAPI loopback через `soundcard` | Ничего не нужно — работает на чистой системе |
+| **macOS 13+** | ScreenCaptureKit когда `soundcard` поддерживает | Иначе поставить [BlackHole](https://existential.audio/blackhole/) и выбрать как input |
+| **Linux** | PulseAudio / PipeWire monitor-source | Из коробки в большинстве дистров |
+
+Установка опционального экстра:
+
+```bash
+pip install video-transcriber[live-record]
+```
+
+## Авторы и благодарности
+
+Этот форк построен на основе [`checkerup/video-transcriber`](https://github.com/checkerup/video-transcriber)
+и сильно вдохновлён:
+
+- **[VoxTerm](https://github.com/dmarzzz/VoxTerm)** от [@dmarzzz](https://github.com/dmarzzz) — проект, который показал что этот стек диаризации работает полностью локально и кроссплатформенно без HF-токена. Новый модуль `diarizer_voxterm.py` переисполняет его концептуальный пайплайн (VAD → сегментация → эмбеддинг спикера → косинусная кластеризация) поверх `sherpa-onnx`. **Код из VoxTerm не копируется напрямую**, но дизайн ему явно обязан. MIT-лицензия; полная атрибуция в [`NOTICE.md`](NOTICE.md).
+
+Используемые ML-компоненты:
+
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** — Apache-2.0 — ONNX-рантайм.
+- **[3D-Speaker](https://github.com/modelscope/3D-Speaker)** (CAM++ / ERes2NetV2) — Apache-2.0 — эмбеддинги спикеров.
+- **[pyannote.audio](https://github.com/pyannote/pyannote-audio)** — MIT (код) / CC-BY 4.0 (модель) — segmentation 3.0.
+- **[Silero VAD](https://github.com/snakers4/silero-vad)** — MIT — детектор речи.
+- **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** — MIT — транскрибация.
+
+Полные атрибуции третьих сторон: [`NOTICE.md`](NOTICE.md).
 
 ## Лицензия
 

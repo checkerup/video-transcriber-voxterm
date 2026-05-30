@@ -25,6 +25,15 @@ transcription:
 telegram:
   bot_token: ""
   chat_id: ""
+  # How to deliver the transcript itself:
+  #   "file" — attach the produced .txt/.srt/.vtt as a Telegram document (default).
+  #   "text" — paste the transcript text inline in chunked messages.
+  #   "none" — only send the short metadata message.
+  send_transcript: "file"
+  send_summary_file: false
+  attach_audio: false
+  attach_video: false
+  max_attachment_mb: 20
 
 recorder:
   fps: 30
@@ -36,8 +45,78 @@ process_watcher:
 
 summarization:
   enabled: false
+  # Provider: "gemini" (default), "openai", "anthropic", "openrouter",
+  # or "custom" (any OpenAI-compatible endpoint via api_base).
   provider: "gemini"
+  # API key for the chosen provider. If empty, falls back to env vars:
+  #   gemini     -> GEMINI_API_KEY or GOOGLE_API_KEY
+  #   openai     -> OPENAI_API_KEY
+  #   anthropic  -> ANTHROPIC_API_KEY
+  #   openrouter -> OPENROUTER_API_KEY
   api_key: ""
+  # Base URL for the API endpoint. If empty, uses the provider's default.
+  api_base: ""
+  # Model name for the chosen provider.
   model: "gemini-1.5-flash"   # can be changed to any Gemini model (e.g. gemini-1.5-pro, gemini-2.0-flash-exp)
-  prompt: ""                  # custom prompt, can contain {text} placeholder for the transcript content
+  # Custom prompt for the LLM. Can contain {text} placeholder for the transcript content.
+  prompt: ""
+  # System prompt for the LLM.
+  system_prompt: ""
+  # Maximum number of tokens to generate.
+  max_tokens: 0
+  # Temperature for the LLM.
+  temperature: 0.0
+  # Top-p sampling parameter.
+  top_p: 0.0
+  # Top-k sampling parameter.
+  top_k: 0
+  # Number of retries for the LLM.
+  retries: 0
+  # Whether to stream the LLM output.
+  stream: false
 
+# Speaker diarization (who-said-what). Two backends are supported.
+diarization:
+  enabled: false
+
+  # "voxterm" (default): fully offline, no HuggingFace token needed.
+  #     Uses sherpa-onnx with pyannote-3.0 segmentation + 3D-Speaker
+  #     embedding models, auto-downloaded on first use. Cross-platform
+  #     (Win/Mac/Linux). Inspired by https://github.com/dmarzzz/VoxTerm.
+  # "pyannote": legacy backend via pyannote.audio. Requires an HF API token
+  #     and accepting the model terms on HuggingFace.
+  backend: "voxterm"
+
+  # Speaker-embedding model for the voxterm backend.
+  # "cam++"    : 7M params, fast, good quality (default)
+  # "eres2net" : larger, slightly better in noisy/multi-speaker audio
+  model: "cam++"
+
+  # Cosine clustering threshold (voxterm backend). Higher = more permissive
+  # grouping = fewer speakers detected. 0.7 is a sensible default for
+  # noisy meeting / call audio; lower it (0.5) only if you want stricter
+  # separation in clean recordings.
+  cluster_threshold: 0.7
+
+  # Number of CPU threads used by the ONNX runtime.
+  num_threads: 1
+
+  # Speech activity smoothing (seconds). Slightly larger values reduce
+  # the "100 speakers in a long noisy call" artefact.
+  min_duration_on: 0.5
+  min_duration_off: 0.7
+
+  # If you KNOW the exact number of speakers in the recording, you can
+  # provide a hint to the backend.
+  num_speakers: 2
+
+  # Used only by the "pyannote" backend.
+  auth_token: ""             # HF token. Also picked up from HF_TOKEN env var.
+
+  # Optional speaker-count hints (both backends).
+  # min_speakers: 2
+  # max_speakers: 4
+
+# Live recording (`--record-live voice|screen|full`) has no config section;
+# it uses recorder.fps and processing.output_folder from above. The chosen
+# mode is passed via the CLI flag.

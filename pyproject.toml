@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-transcriber"
-version = "1.0.0"
+version = "1.1.0"
 description = "Auto-transcribe videos: watch folder, extract audio, transcribe, notify via Telegram"
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,7 +22,28 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = ["ctranslate2>=4.0", "nvidia-cublas-cu12"]
+# Default offline diarization backend (no HF token required) — uses
+# sherpa-onnx with pyannote-3.0 segmentation + 3D-Speaker embeddings.
+diarization-voxterm = [
+    "sherpa-onnx>=1.10",
+    "soundfile>=0.12",
+    "numpy>=1.24",
+]
+# Legacy backend: pyannote.audio. Requires a HuggingFace token and accepting
+# model terms on HF for `pyannote/speaker-diarization-3.1`.
+diarization-pyannote = ["pyannote.audio>=3.1"]
+# Back-compat alias: the original optional extra was just "diarization" and
+# meant pyannote. Kept as an alias so existing install snippets still work.
 diarization = ["pyannote.audio>=3.1"]
+# Live recording (mic + system audio loopback). System-audio loopback works
+# on Windows out of the box (WASAPI), on Linux via PulseAudio monitors, and
+# on macOS via ScreenCaptureKit (modern macOS) or BlackHole.
+live-record = [
+    "sounddevice>=0.4",
+    "soundfile>=0.12",
+    "soundcard>=0.4",
+    "numpy>=1.24",
+]
 dev = ["pytest>=7.0", "ruff>=0.4"]
 
 [project.scripts]

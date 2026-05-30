@@ -235,7 +235,58 @@ def run_setup_wizard(config_path: Path | None = None) -> AppConfig:
 
 
 def is_setup_done(config_path: Path | None = None) -> bool:
+    """Return True if first-run setup has already been completed.
+
+    Considered "done" when either:
+      - the ``.setup_done`` marker file exists in the project root, OR
+      - a ``config.yaml`` already exists alongside it with the essential
+        fields filled in (``watch.folder`` + ``processing.output_folder``).
+
+    The second case covers users who hand-crafted ``config.yaml`` (e.g. by
+    copying ``config.example.yaml`` or restoring from backup) and would
+    otherwise be greeted by the wizard — which would overwrite their file.
+    When that case triggers, we also create the marker so subsequent
+    startups don't have to re-parse the YAML.
+    """
     if config_path is None:
         config_path = Path(__file__).resolve().parent.parent.parent
-    marker = config_path / CONFIG_MARKER if config_path.is_dir() else config_path.parent / CONFIG_MARKER
-    return marker.exists()
+    project_root = config_path if config_path.is_dir() else config_path.parent
+    marker = project_root / CONFIG_MARKER
+    if marker.exists():
+        return True
+
+    yaml_path = project_root / "config.yaml"
+    if _has_usable_config(yaml_path):
+        try:
+            marker.write_text("done (auto-detected existing config.yaml)\n")
+        except OSError:
+            pass
+        return True
+
+    return False
+
+
+def _has_usable_config(yaml_path: Path) -> bool:
+    """Cheap check: does ``yaml_path`` look like a configured config.yaml?
+
+    We require the two fields the daemon literally cannot run without —
+    ``watch.folder`` and ``processing.output_folder`` — to be present and
+    non-empty. Anything more specific (Telegram, diarization, etc.) is
+    optional and should not block startup.
+    """
+    if not yaml_path.is_file():
+        return False
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    watch = data.get("watch") or {}
+    proc = data.get("processing") or {}
+    if not isinstance(watch, dict) or not isinstance(proc, dict):
+        return False
+    return bool(str(watch.get("folder") or "").strip()) and bool(
+        str(proc.get("output_folder") or "").strip()
+    )

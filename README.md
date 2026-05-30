@@ -1,5 +1,16 @@
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Русский](https://img.shields.io/badge/lang-Русский-red.svg)](README.ru.md) [![中文](https://img.shields.io/badge/lang-中文-green.svg)](README.zh.md)
 
+> **This is a fork** of [`checkerup/video-transcriber`](https://github.com/checkerup/video-transcriber)
+> that adds **offline speaker diarization** (who-said-what, no HuggingFace token)
+> and a **live-recording mode** (mic / mic+screen / mic+screen+system-audio,
+> transcribed automatically when you stop).
+>
+> The diarization pipeline is inspired by [`VoxTerm`](https://github.com/dmarzzz/VoxTerm)
+> by [@dmarzzz](https://github.com/dmarzzz) — full credits in [`NOTICE.md`](NOTICE.md).
+>
+> 🎨 **Looking for the desktop GUI?**
+> A graphical version with drag-drop, live progress bars, settings forms, and history exists on the `feat/desktop-ui` branch. Screenshots and details are TBD. This branch (`feat/voxterm-integration`) is the CLI-only flavour.
+
 # Video Transcriber
 
 Automatic video transcription: watches a folder or program launches, records screen, transcribes locally (free!), sends Telegram notifications.
@@ -15,17 +26,20 @@ Automatic video transcription: watches a folder or program launches, records scr
 - **Audio extraction** — FFmpeg pulls MP3 without re-encoding
 - **Transcription** — faster-whisper (local, free, private) with timestamps
 - **Notifications** — Telegram bot reports when done with file paths
-- **Autostart** — install as auto-start service with one command (Windows/macOS/Linux)
-- **Interactive menu** — `menu.bat` / `menu.sh` with all modes
+- **🤖 Multi-provider LLM summarization** — choose between Gemini, OpenAI, Anthropic, OpenRouter, or any OpenAI-compatible endpoint (custom api_base).
+- **📎 Optional Telegram attachments** — send the transcript file (or inline text), summary .md, audio, even the video, all configurable per file size limit.
+- **🔁 Retag-speakers** — re-r
 - **Cross-platform** — Windows, macOS, Linux
+- **Offline speaker diarization** — sherpa-onnx + 3D-Speaker (CAM++ / ERes2NetV2) + pyannote-3.0 segmentation. Fully local, no HF token, models auto-downloaded on first run (~30 MB). Inspired by VoxTerm.
+- **Live recording mode** — `--record-live voice|screen|full` records mic (and optionally screen + system-audio loopback), then auto-transcribes on stop. Windows uses WASAPI loopback, **no VB-Cable required**.
 
 ## Quick Start
 
 ### Windows
 
 ```bat
-git clone https://github.com/checkerup/video-transcriber.git
-cd video-transcriber
+git clone https://github.com/checkerup/video-transcriber-voxterm.git
+cd video-transcriber-voxterm
 install.bat
 menu.bat
 ```
@@ -33,8 +47,8 @@ menu.bat
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/checkerup/video-transcriber.git
-cd video-transcriber
+git clone https://github.com/checkerup/video-transcriber-voxterm.git
+cd video-transcriber-voxterm
 chmod +x install.sh menu.sh start.sh stop.sh
 ./install.sh
 ./menu.sh
@@ -279,6 +293,9 @@ video-transcriber/
 │   ├── process_watcher.py   # process monitoring (psutil)
 │   ├── screen_recorder.py   # screen recording (FFmpeg)
 │   ├── config.py            # config loader (YAML + .env)
+│   ├── diarizer.py          # diarization dispatcher (voxterm | pyannote)
+│   ├── diarizer_voxterm.py  # offline diarization (sherpa-onnx, VoxTerm-style)
+│   ├── live_recorder.py     # live mic/screen/full recording + auto-transcribe
 │   ├── watcher.py           # folder watching (watchdog)
 │   ├── extractor.py         # FFmpeg → MP3
 │   ├── transcriber.py       # faster-whisper transcription
@@ -295,6 +312,119 @@ video-transcriber/
 ├── requirements.txt         # dependencies
 └── LICENSE                  # MIT
 ```
+
+## Speaker Diarization (who-said-what)
+
+Two backends are available, configurable in `config.yaml` under `diarization:`.
+
+### `voxterm` backend — *default, fully offline, no HF token* ⭐
+
+Uses [`sherpa-onnx`](https://github.com/k2-fsa/sherpa-onnx) with a pyannote-3.0
+segmentation model + a 3D-Speaker embedding model (CAM++ by default, ERes2NetV2
+optional). Inspired by [`VoxTerm`](https://github.com/dmarzzz/VoxTerm) — full
+attribution in [`NOTICE.md`](NOTICE.md).
+
+```bash
+pip install video-transcriber[diarization-voxterm]
+```
+
+```yaml
+diarization:
+  enabled: true
+  backend: "voxterm"      # default
+  model: "cam++"          # or "eres2net"
+  cluster_threshold: 0.5  # lower = more speakers, higher = fewer
+  num_speakers: null      # set to an integer to force a known speaker count
+```
+
+Models (~30 MB) are downloaded once into `~/.cache/video-transcriber/diarization/`
+and reused offline forever after.
+
+### `pyannote` backend — *legacy, requires HF token*
+
+The original backend that uses the gated `pyannote/speaker-diarization-3.1`
+pipeline. Needs a HuggingFace token + accepting model terms on the HF page.
+
+```bash
+pip install video-transcriber[diarization-pyannote]
+```
+
+```yaml
+diarization:
+  enabled: true
+  backend: "pyannote"
+  hf_token: "hf_xxx"
+```
+
+### Output
+
+Transcript lines are tagged with the speaker label, e.g.:
+
+```
+[00:00:03 → Speaker 1] Hi, how's it going?
+[00:00:05 → Speaker 2] Pretty good, did you get a chance to look...
+[00:00:09 → Speaker 1] Yeah, by the way...
+```
+
+SRT / VTT outputs include speaker labels in the cue text.
+
+## Live Recording Mode
+
+Record audio (and optionally screen) directly from the CLI, get a
+transcribed + diarized output as soon as you press `Ctrl+C`.
+
+```bash
+# mic only -> .wav + transcript
+python -m video_transcriber.main --record-live voice
+
+# screen + mic -> .mp4 + transcript
+python -m video_transcriber.main --record-live screen
+
+# screen + mic + system-audio loopback -> .mp4 + transcript
+# (perfect for transcribing Zoom / Meet calls including the other side)
+python -m video_transcriber.main --record-live full
+```
+
+Output goes to a timestamped folder under the configured `processing.output_folder`:
+
+```
+recordings/2026-05-28_04-15-22/
+├── audio.wav           # mixed mic + system audio (mono 16k)
+├── screen.mp4          # only for screen / full modes
+├── transcript.txt      # speaker-tagged transcript
+└── transcript.srt      # subtitles with speaker labels
+```
+
+### Platform notes for system-audio loopback (`full` mode)
+
+| OS | How it works | Extra setup |
+|---|---|---|
+| **Windows 10/11** | WASAPI loopback via `soundcard` | None — works on a vanilla machine |
+| **macOS 13+** | ScreenCaptureKit when `soundcard` supports it | Otherwise install [BlackHole](https://existential.audio/blackhole/) and select it as input |
+| **Linux** | PulseAudio / PipeWire monitor source | Most distros have it out of the box |
+
+Install the live-recording extra:
+
+```bash
+pip install video-transcriber[live-record]
+```
+
+## Credits
+
+This fork builds on top of [`checkerup/video-transcriber`](https://github.com/checkerup/video-transcriber)
+and is heavily inspired by:
+
+- **[VoxTerm](https://github.com/dmarzzz/VoxTerm)** by [@dmarzzz](https://github.com/dmarzzz) — the project that demonstrated this diarization stack works fully on-device, cross-platform, with no HF token. The new `diarizer_voxterm.py` re-implements its conceptual pipeline (VAD → segmentation → speaker embedding → cosine clustering) on top of `sherpa-onnx`. **No code is copied verbatim from VoxTerm**, but the design owes a clear debt to it. MIT-licensed; see [`NOTICE.md`](NOTICE.md) for the full attribution.
+
+Underlying ML components:
+
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** — Apache-2.0 — ONNX inference runtime.
+- **[3D-Speaker](https://github.com/modelscope/3D-Speaker)** (CAM++ / ERes2NetV2) — Apache-2.0 — speaker embeddings.
+- **[pyannote.audio](https://github.com/pyannote/pyannote-audio)** — MIT (code) / CC-BY 4.0 (model) — segmentation 3.0.
+- **[Silero VAD](https://github.com/snakers4/silero-vad)** — MIT — voice-activity detection.
+- **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** — MIT — transcription.
+
+Full third-party notices: [`NOTICE.md`](NOTICE.md).
 
 ## License
 

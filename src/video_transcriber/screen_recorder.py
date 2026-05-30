@@ -3,6 +3,7 @@ import platform
 import subprocess
 import threading
 import time
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def _ffmpeg_record_cmd(output_path: str, config: AppConfig) -> list[str]:
             "-preset", "ultrafast",
             "-crf", "23",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
             "-y",
             output_path,
         ]
@@ -46,6 +48,7 @@ def _ffmpeg_record_cmd(output_path: str, config: AppConfig) -> list[str]:
             "-preset", "ultrafast",
             "-crf", "23",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
             "-y",
             output_path,
         ]
@@ -62,6 +65,7 @@ def _ffmpeg_record_cmd(output_path: str, config: AppConfig) -> list[str]:
             "-preset", "ultrafast",
             "-crf", "23",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
             "-y",
             output_path,
         ]
@@ -89,12 +93,14 @@ def start_recording(config: AppConfig) -> str | None:
         logger.debug("FFmpeg cmd: %s", " ".join(cmd))
 
         try:
-            _current_recording = subprocess.Popen(
-                cmd,
+            _popen_kw = dict(
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
+            if sys.platform == "win32":
+                _popen_kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            _current_recording = subprocess.Popen(cmd, **_popen_kw)
             _current_output = output_path
 
             time.sleep(1)
@@ -127,18 +133,42 @@ def stop_recording() -> str | None:
             return None
 
         logger.info("Stopping screen recording...")
-        try:
-            _current_recording.stdin.write(b"q")
-            _current_recording.stdin.flush()
-        except Exception:
-            pass
+        proc = _current_recording
 
-        try:
-            _current_recording.wait(timeout=10)
-        except subprocess.TimeoutExpired:
+        # 1) Windows: CTRL_BREAK_EVENT first (cleanest finalize for fragmented mp4).
+        if sys.platform == "win32":
+            try:
+                import signal as _sig
+                proc.send_signal(_sig.CTRL_BREAK_EVENT)
+                try:
+                    proc.wait(timeout=8)
+                    logger.info("FFmpeg stopped via CTRL_BREAK_EVENT")
+                except subprocess.TimeoutExpired:
+                    pass
+            except Exception as e:
+                logger.debug("CTRL_BREAK_EVENT failed: %s", e)
+
+        # 2) If still alive: send 'q\n' on stdin and close it.
+        if proc.poll() is None:
+            try:
+                if proc.stdin:
+                    proc.stdin.write(b"q\n")
+                    proc.stdin.flush()
+                    proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=8)
+                logger.info("FFmpeg stopped via stdin 'q'")
+            except subprocess.TimeoutExpired:
+                pass
+
+        # 3) Last resort: kill (output is still recoverable thanks to
+        #    fragmented-mp4 movflags above).
+        if proc.poll() is None:
             logger.warning("FFmpeg didn't stop gracefully, killing...")
-            _current_recording.kill()
-            _current_recording.wait(timeout=5)
+            proc.kill()
+            proc.wait(timeout=5)
 
         output = _current_output
         logger.info("Recording stopped: %s", output)

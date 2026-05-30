@@ -144,6 +144,28 @@ def run_record(config):
             logger.info("Done. Transcript: %s", result["transcript"])
 
 
+def run_live(config, mode: str):
+    """Live recording mode (voice / screen / full).
+
+    Records until Ctrl+C, then feeds the resulting media file through the
+    transcription + diarization pipeline.
+    """
+    from .live_recorder import run_live_recording
+
+    logger.info("Starting live recording (mode=%s). Press Ctrl+C to stop.", mode)
+    media_path = run_live_recording(config, mode=mode)
+    if not media_path:
+        logger.error("Live recording produced no output")
+        sys.exit(1)
+
+    logger.info("Recording saved: %s", media_path)
+    result = process_file(str(media_path), config)
+    if result["error"]:
+        logger.error("Pipeline failed: %s", result["error"])
+    else:
+        logger.info("Done. Transcript: %s", result["transcript"])
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Video Transcriber — auto-transcribe videos with Telegram notifications",
@@ -215,6 +237,61 @@ def main():
     parser.add_argument(
         "--max-speakers", type=int, default=None,
         help="Maximum number of expected speakers",
+    )
+    parser.add_argument(
+        "--diar-backend", type=str, default=None,
+        choices=["voxterm", "pyannote"],
+        help="Diarization backend: 'voxterm' (offline, default) or 'pyannote' (HF).",
+    )
+    parser.add_argument(
+        "--diar-model", type=str, default=None,
+        choices=["cam++", "eres2net"],
+        help="Speaker-embedding model for the voxterm backend (default: cam++).",
+    )
+    parser.add_argument(
+        "--record-live",
+        choices=["voice", "screen", "full"],
+        default=None,
+        help=(
+            "Live recording mode: 'voice' (mic only), 'screen' (screen+mic), "
+            "or 'full' (screen+mic+system audio)."
+        ),
+    )
+    parser.add_argument(
+        "--retag-speakers",
+        type=str,
+        default=None,
+        metavar="TRANSCRIPT",
+        help=(
+            "Re-tag speakers on an existing transcript (.txt/.srt/.vtt) "
+            "WITHOUT re-running Whisper. Uses --audio if given, else "
+            "auto-discovers the audio file next to the transcript. "
+            "Combine with --num-speakers / --cluster-threshold / "
+            "--diar-model to tune."
+        ),
+    )
+    parser.add_argument(
+        "--audio",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Explicit audio file to use with --retag-speakers.",
+    )
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Force exact number of speakers (overrides clustering threshold)."
+        ),
+    )
+    parser.add_argument(
+        "--cluster-threshold",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help="Clustering threshold for speaker separation.",
     )
 
     args = parser.parse_args()
@@ -293,6 +370,12 @@ def main():
     if args.max_speakers is not None:
         config.diarization.max_speakers = args.max_speakers
 
+    if args.diar_backend is not None:
+        config.diarization.backend = args.diar_backend
+
+    if args.diar_model is not None:
+        config.diarization.model = args.diar_model
+
     if args.convert_mp3:
         from .extractor import convert_video_to_mp3
         for file_path in args.convert_mp3:
@@ -314,8 +397,20 @@ def main():
         config.transcription.device,
     )
 
-    if args.file:
+    if args.retag_speakers:
+        from .retag_speakers import retag_speakers
+        retag_speakers(
+            args.retag_speakers,
+            config,
+            audio_path=args.audio,
+            num_speakers=args.num_speakers,
+            cluster_threshold=args.cluster_threshold,
+        )
+        sys.exit(0)
+    elif args.file:
         run_once(config, args.file)
+    elif args.record_live:
+        run_live(config, args.record_live)
     elif args.record:
         run_record(config)
     else:

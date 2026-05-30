@@ -199,17 +199,48 @@ def transcribe(audio_path: str, config: AppConfig, speaker_turns: list[dict] | N
 
     segment_list = []
     last_log_time = time.time()
+    _local_start = time.time()
+    _timer = getattr(config, "_progress_timer", None)
+    try:
+        from .progress_timer import format_hms as _fmt_hms
+    except ImportError:
+        def _fmt_hms(s):
+            try:
+                if s is None or s < 0:
+                    return "--:--:--"
+                s = int(s); h, r = divmod(s, 3600); m, ss = divmod(r, 60)
+                return f"{h:02d}:{m:02d}:{ss:02d}"
+            except Exception:
+                return "--:--:--"
     for seg in segments:
         segment_list.append(seg)
         current_time = time.time()
         if current_time - last_log_time >= 15:
-            progress = (seg.end / info.duration) * 100 if info.duration else 0.0
+            progress_frac = (seg.end / info.duration) if info.duration else 0.0
+            progress_pct = progress_frac * 100
+            if _timer is not None:
+                elapsed = _timer.stage_elapsed("transcribe") or 0.0
+                eta = _timer.estimate_eta(progress_frac, stage_name="transcribe")
+            else:
+                elapsed = current_time - _local_start
+                eta = (elapsed / progress_frac - elapsed) if 0 < progress_frac < 1 and elapsed > 0 else None
             logger.info(
-                "Transcription progress: %.1f%% (%s / %s)",
-                progress,
+                "Transcription progress: %.1f%% (%s / %s) — elapsed %s, ETA %s",
+                progress_pct,
                 format_timestamp(seg.end),
                 format_timestamp(info.duration),
+                _fmt_hms(elapsed),
+                _fmt_hms(eta),
             )
+            gui_cb = getattr(config, "_gui_progress_cb", None)
+            if gui_cb is not None:
+                try:
+                    # Map 0..1 transcribe progress into the 0.35..0.90 band
+                    # we allocated for the transcribe stage in the pipeline.
+                    overall = 0.35 + 0.55 * max(0.0, min(1.0, progress_frac))
+                    gui_cb("transcribe", overall, float(elapsed or 0.0), float(eta or 0.0))
+                except Exception:
+                    pass
             last_log_time = current_time
     logger.info(
         "Transcription complete: %d segments, language=%s (%.1f%% confidence)",

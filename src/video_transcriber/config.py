@@ -54,6 +54,18 @@ class TranscriptionConfig:
 class TelegramConfig:
     bot_token: str = ""
     chat_id: str = ""
+    # How to deliver the transcript itself.
+    #   "file" — send the transcript file as a document (default).
+    #   "text" — inline the transcript text in messages (chunked at 4000ch).
+    #   "none" — just the metadata message, no transcript content.
+    send_transcript: str = "file"
+    # If True and a summary file exists, also attach it as a document.
+    send_summary_file: bool = False
+    # If True, also attach the produced audio/video as documents (heavy).
+    attach_audio: bool = False
+    attach_video: bool = False
+    # Telegram bot API hard limit is 50
+    max_attachment_mb: int = 49
 
 
 @dataclass
@@ -71,18 +83,44 @@ class ProcessWatcherConfig:
 @dataclass
 class SummarizationConfig:
     enabled: bool = False
+    # Provider: "gemini" (default), "openai", "anthropic", "openrouter",
+    # or "custom" (any OpenAI-compatible endpoint via api_base).
     provider: str = "gemini"
     api_key: str = ""
+    api_base: str = ""        # Custom base URL (only required for provider="custom").
     model: str = "gemini-1.5-flash"
-    prompt: str = ""
+    prompt: str = ""          # If empty, a sensible default is used (see summarizer.py).
+    system_prompt: str = ""  # Optional system instruction (OpenAI / Anthropic style).
+    temperature: float = 0.3
+    max_output_tokens: int = 8192
+    language: str = "auto"   # "auto" = follow transcript language; or "ru", "en", "zh", ...
 
 
 @dataclass
 class DiarizationConfig:
     enabled: bool = False
+    # Backend: "voxterm" (offline, default) or "pyannote" (HF, legacy).
+    backend: str = "voxterm"
+    # Speaker-embedding model id for the voxterm backend.
+    # Supported: "cam++" (default, fast), "eres2net" (slightly better).
+    model: str = "cam++"
+    # Cosine-distance clustering threshold (voxterm backend). Higher = more
+    # permissive grouping = fewer speakers detected. 0.5 is too aggressive on
+    # noisy long-form recordings (it splits one person across many clusters);
+    # 0.7 is a better default for typical meeting / call audio.
+    cluster_threshold: float = 0.7
+    # Number of CPU threads used by the ONNX runtime for diarization.
+    num_threads: int = 1
+    # Minimum on/off speech durations passed to the segmentation model.
+    # Slightly larger
+    min_duration_on: float = 0.5
+    # Min duration (s) of a silence gap (voxterm backend).
+    min_duration_off: float = 0.7
+    # HF API token for the legacy pyannote backend (ignored by voxterm).
     auth_token: str = ""
     min_speakers: int | None = None
     max_speakers: int | None = None
+    num_speakers: int | None = None
 
 
 @dataclass
@@ -134,6 +172,23 @@ def _as_list(val, default: list) -> list:
     if isinstance(val, list):
         return [str(item).strip() for item in val]
     return default
+
+
+def _llm_api_key_from_env(provider: str) -> str | None:
+    """Pick an API key from environment variables based on the configured LLM provider."""
+    p = (provider or "").lower().strip()
+    env_map = {
+        "gemini":     ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "openai":     ["OPENAI_API_KEY"],
+        "anthropic":  ["ANTHROPIC_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
+        "custom":     ["LLM_API_KEY"],
+    }
+    for var in env_map.get(p, []):
+        val = os.getenv(var)
+        if val:
+            return val
+    return None
 
 
 def _get_dict_section(raw: dict, name: str) -> dict:
@@ -221,6 +276,27 @@ def load_config(config_path: str | Path | None = None, load_env_file: bool = Tru
         telegram=TelegramConfig(
             bot_token=bot_token,
             chat_id=chat_id,
+            send_transcript=str(
+                tg_raw.get("send_transcript")
+                if tg_raw.get("send_transcript") is not None
+                else TelegramConfig.send_transcript
+            ).lower().strip() or "file",
+            send_summary_file=_as_bool(
+                tg_raw.get("send_summary_file"),
+                TelegramConfig.send_summary_file
+            ),
+            attach_audio=_as_bool(
+                tg_raw.get("attach_audio"),
+                TelegramConfig.attach_audio
+            ),
+            attach_video=_as_bool(
+                tg_raw.get("attach_video"),
+                TelegramConfig.attach_video
+            ),
+            max_attachment_mb=_as_int(
+                tg_raw.get("max_attachment_mb"),
+                TelegramConfig.max_attachment_mb
+            ),
         ),
         recorder=RecorderConfig(
             fps=fps,
@@ -233,15 +309,39 @@ def load_config(config_path: str | Path | None = None, load_env_file: bool = Tru
         summarization=SummarizationConfig(
             enabled=_as_bool(sum_raw.get("enabled"), default_sum.enabled),
             provider=str(sum_raw.get("provider") or default_sum.provider),
-            api_key=str(sum_raw.get("api_key") or os.getenv("GEMINI_API_KEY") or default_sum.api_key or ""),
+            api_key=str(sum_raw.get("api_key") or _llm_api_key_from_env(str(sum_raw.get("provider") or default_sum.provider)) or default_sum.api_key or ""),
+            api_base=str(sum_raw.get("api_base") or default_sum.api_base),
             model=str(sum_raw.get("model") or default_sum.model),
             prompt=str(sum_raw.get("prompt") or default_sum.prompt),
+            system_prompt=str(sum_raw.get("system_prompt") or default_sum.system_prompt),
+            temperature=float(sum_raw.get("temperature") or default_sum.temperature),
+            max_output_tokens=int(sum_raw.get("max_output_tokens") or default_sum.max_output_tokens),
+            language=str(sum_raw.get("language") or default_sum.language),
         ),
         diarization=DiarizationConfig(
             enabled=_as_bool(diar_raw.get("enabled"), default_diar.enabled),
+            backend=str(diar_raw.get("backend") or default_diar.backend),
+            model=str(diar_raw.get("model") or default_diar.model),
+            cluster_threshold=float(
+                diar_raw.get("cluster_threshold")
+                if diar_raw.get("cluster_threshold") is not None
+                else default_diar.cluster_threshold
+            ),
+            num_threads=_as_int(diar_raw.get("num_threads"), default_diar.num_threads),
+            min_duration_on=float(
+                diar_raw.get("min_duration_on")
+                if diar_raw.get("min_duration_on") is not None
+                else default_diar.min_duration_on
+            ),
+            min_duration_off=float(
+                diar_raw.get("min_duration_off")
+                if diar_raw.get("min_duration_off") is not None
+                else default_diar.min_duration_off
+            ),
             auth_token=str(diar_raw.get("auth_token") or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN") or default_diar.auth_token or ""),
             min_speakers=None if diar_raw.get("min_speakers") is None else _as_int(diar_raw.get("min_speakers"), 0) or None,
             max_speakers=None if diar_raw.get("max_speakers") is None else _as_int(diar_raw.get("max_speakers"), 0) or None,
+            num_speakers=None if diar_raw.get("num_speakers") is None else _as_int(diar_raw.get("num_speakers"), 0) or None,
         ),
     )
 
