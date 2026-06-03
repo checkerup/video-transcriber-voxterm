@@ -221,6 +221,21 @@ Zoom.exe 退出
 | macOS | `-f avfoundation -i 1` | 需要在系统设置 → 隐私 → 屏幕录制中授权 |
 | Linux | `-f x11grab -i :0.0` | 需要 X11。Wayland 下：使用 pipewire 或切换到 X11 |
 
+## 音频捕获
+
+屏幕录制器默认捕获**麦克风 + 系统声音**（`recorder.audio_mode: both`）。
+在 `config.yaml` 中设置为 `mic`、`system` 或 `none`，或在桌面 UI 的 Settings 标签页中选择设备。详见 [docs/audio.md](docs/audio.md)。
+
+| 模式 | 捕获内容 |
+|------|---------|
+| `none` | 仅视频（旧行为） |
+| `mic` | 仅麦克风 |
+| `system` | 仅系统声音（"您听到的内容"） |
+| `both` | 麦克风 + 系统声音混合为一条 AAC 音轨（默认） |
+
+> **注意：** 这与 Live 标签页中 `--record-live` 模式不同。该模式使用 `sounddevice`/`soundcard`，
+> 而屏幕录制器直接通过 FFmpeg 捕获（Windows 用 dshow，macOS 用 avfoundation，Linux 用 PulseAudio）。
+
 ## Whisper 模型（免费，MIT 许可证）
 
 模型在首次运行时**自动下载一次**。所有 OpenAI Whisper 模型都是开源的（MIT），永久免费。

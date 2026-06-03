@@ -33,6 +33,7 @@ Automatic video transcription: watches a folder or program launches, records scr
 - **Cross-platform** — Windows, macOS, Linux
 - **Offline speaker diarization** — sherpa-onnx + 3D-Speaker (CAM++ / ERes2NetV2) + pyannote-3.0 segmentation. Fully local, no HF token, models auto-downloaded on first run (~30 MB). Inspired by VoxTerm.
 - **Live recording mode** — `--record-live voice|screen|full` records mic (and optionally screen + system-audio loopback), then auto-transcribes on stop. Windows uses WASAPI loopback, **no VB-Cable required**.
+- **Audio capture during screen recording** — the screen recorder captures mic + system audio by default (`recorder.audio_mode: both`). Configure via `config.yaml` or the Settings tab in the desktop UI.
 
 ## Quick Start
 
@@ -118,7 +119,7 @@ python -m video_transcriber.main --watch-process "Zoom.exe,Teams.exe"
 
 ### 3. Manual Screen Recording
 
-Start recording → Ctrl+C → stop → transcribe:
+Start recording → Ctrl+C → stop → transcribe. Captures audio alongside the screen (configurable via `recorder.audio_mode`):
 
 ```bash
 python -m video_transcriber.main --record
@@ -188,6 +189,9 @@ telegram:
 recorder:
   fps: 30                          # screen recording FPS
   # video_size: "1920x1080"        # resolution (Linux/x11grab only)
+  audio_mode: both                 # none | mic | system | both (default: both)
+  mic_device: ""                   # leave empty for OS default
+  system_device: ""                # leave empty for OS default loopback
 
 process_watcher:
   program_names: ["Zoom.exe"]       # process names to watch for
@@ -219,6 +223,23 @@ Zoom.exe exits
 | Windows | `-f gdigrab -i desktop` | Works out of the box |
 | macOS | `-f avfoundation -i 1` | Requires Screen Recording permission in System Settings → Privacy |
 | Linux | `-f x11grab -i :0.0` | Requires X11. On Wayland: use pipewire or switch to X11 |
+
+## Audio Capture
+
+The screen recorder captures **mic + system audio by default** (`recorder.audio_mode: both`).
+Set it to `mic`, `system`, or `none` in `config.yaml`, or pick devices from the
+Settings tab in the desktop UI. Full details in [docs/audio.md](docs/audio.md).
+
+| Mode | What gets captured |
+|------|--------------------|
+| `none` | Video only (legacy behaviour) |
+| `mic` | Microphone only |
+| `system` | System audio ("what you hear") only |
+| `both` | Mic + System mixed into one AAC track (default) |
+
+> **Note:** This is separate from the Live tab's `--record-live` mode, which uses
+> `sounddevice`/`soundcard` for audio capture. The screen recorder uses FFmpeg
+> directly (dshow on Windows, avfoundation on macOS, PulseAudio on Linux).
 
 ## Whisper Models (free, MIT license)
 
@@ -292,8 +313,10 @@ video-transcriber/
 │   ├── setup_wizard.py      # interactive first-run wizard
 │   ├── autostart.py         # autostart (Windows/macOS/Linux)
 │   ├── process_watcher.py   # process monitoring (psutil)
-│   ├── screen_recorder.py   # screen recording (FFmpeg)
-│   ├── config.py            # config loader (YAML + .env)
+│   ├── screen_recorder.py   # screen recording (FFmpeg) with audio capture
+│   ├── audio_devices.py     # enumerate audio input devices (dshow/AVFoundation/PulseAudio)
+│   ├── config.py            # config loader (YAML + .env) + audio_mode fields
+│   ├── config_migration.py  # auto-migrate legacy config to PR1 schema
 │   ├── diarizer.py          # diarization dispatcher (voxterm | pyannote)
 │   ├── diarizer_voxterm.py  # offline diarization (sherpa-onnx, VoxTerm-style)
 │   ├── live_recorder.py     # live mic/screen/full recording + auto-transcribe
@@ -302,7 +325,14 @@ video-transcriber/
 │   ├── transcriber.py       # faster-whisper transcription
 │   ├── notifier.py          # Telegram notifications
 │   ├── pipeline.py          # pipeline orchestration
-│   └── main.py              # CLI entry point
+│   ├── main.py              # CLI entry point
+│   └── webui/               # desktop GUI (PyWebView)
+│       ├── api.py           # JsApi bridge (Python ↔ JavaScript)
+│       ├── app.py           # pywebview window launcher
+│       ├── jobs.py          # background job manager
+│       └── static/          # HTML/CSS/JS frontend (Alpine.js)
+├── docs/
+│   └── audio.md             # audio capture configuration guide
 ├── menu.bat / menu.sh       # interactive menu
 ├── install.bat / install.sh # auto-installer
 ├── start.bat / start.sh     # quick start
@@ -330,9 +360,9 @@ python -m video_transcriber.main --gui
 | Tab | What's there |
 |---|---|
 | 📥 **Process** | Click to browse a file → settings form (Whisper model, language, translate-to, summarize, full diarization block with backend / model / cluster-threshold slider / num-speakers) → Start. Live progress with stage / elapsed / ETA + a 30-line log tail. Cancel in-flight jobs. |
-| 🎙 **Live** | Voice / Screen / Full record mode, Start/Stop, auto-queue for transcription on stop. |
+| 🎙 **Live** | Voice / Screen / Full record mode (sounddevice/soundcard), Start/Stop, auto-queue for transcription on stop. Plus **Screen recorder** card (FFmpeg-based, captures audio via configured devices). |
 | 📋 **History** | Past runs from `timing.json` reports. Click a run to open the transcript drawer with **🔁 Retag speakers** controls (num-speakers + threshold slider — re-runs ONLY diarization, no Whisper re-cost). |
-| ⚙ **Settings** | Folders, AI / LLM card (provider radio, API key with mask, model, prompt, temperature, language, **🧪 Test connection** button), Telegram card (token + chat-id + attachment toggles), raw `config.yaml` editor. |
+| ⚙ **Settings** | Folders, **Audio capture** card (audio mode, mic/loopback device pickers), AI / LLM card (provider radio, API key with mask, model, prompt, temperature, language, **🧪 Test connection** button), Telegram card (token + chat-id + attachment toggles), raw `config.yaml` editor. |
 | 🔧 **System** | Hardware probe (CPU / GPU / RAM), recent stderr tail, version, credits. |
 
 ### Notes
@@ -454,12 +484,6 @@ Underlying ML components:
 - **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** — MIT — transcription.
 
 Full third-party notices: [`NOTICE.md`](NOTICE.md).
-
-## Audio capture
-
-The recorder captures **mic + system audio by default** (`recorder.audio_mode: both`).
-Set it to `mic`, `system`, or `none` in `config.yaml`, or pick devices from the
-Settings tab in the desktop UI. Full details in [docs/audio.md](docs/audio.md).
 
 ## License
 
